@@ -80,7 +80,9 @@ main(int argc, char *argv[])
     int numExecutions;
     
     //My declarations (p4)
-
+    int ctr;
+    //int j;
+    
     
     
     if (argc != 5) {
@@ -118,10 +120,26 @@ main(int argc, char *argv[])
     for (i = 0; i < MAX_CACHE_SIZE; i++) {
         cache.blocks[i].isDirty = false;
         cache.blocks[i].validBit = false;
-        cache.blocks[i].lruLabel = 0;
-        cache.blocks[i].set = 0;
-        cache.blocks[i].tag = 0;
+        cache.blocks[i].lruLabel = -36;
+        //cache.blocks[i].set = 0;
+        cache.blocks[i].tag = -36;
     }
+    ctr = 0;
+    for (i = 0; i < cache.numSets * cache.blocksPerSet; i++) {
+        cache.blocks[i].set = ctr;
+        if (cache.blocksPerSet % i == 0) {
+            ctr++;
+        }
+    }
+    /*
+    while (i < cache.numSets) {
+        for (j = 0; j < cache.blocksPerSet; j++) {
+            cache.blocks[ctr].set = i;
+            ctr += cache.blockSize;
+        }
+        i++;
+    }
+     */
 
     /* read the entire machine-code file into memory */
     for (state.numMemory = 0; fgets(line, MAXLINELENGTH, filePtr) != NULL;
@@ -367,8 +385,11 @@ int lwSw(int addr, int data, char instruction) {
     int setBits;
     int tagBits;
     int i = 0;
-    bool hit = false;
-    bool emptySpot = true;
+    //int j = 0;
+    int hit = 0;
+    int hitSpot = 0;
+    int emptySpot = 0;
+    int hitSpotLRU;
     //adding data to cache:
     //  cache.blocks[set].data[BO] = data;
     
@@ -386,21 +407,70 @@ int lwSw(int addr, int data, char instruction) {
     tempAddr = tempAddr >> setBitsSize;
     //get tagBits
     tagBits = tempAddr;
-    
-    for (i = 0; i < 256; i += cache.blockSize) {
-        
+ 
+
+    for (i = 0; i < cache.blocksPerSet; i++) {
+        //if tag and set index match
+        if (cache.blocks[(setBits*cache.blocksPerSet)+ i].tag == tagBits &&
+            cache.blocks[(setBits*cache.blocksPerSet)+ i].validBit == 1) {
+            hit = 1;
+            hitSpot = setBits+cache.blocksPerSet + i;
+        }
+        //unused tag
+        if (cache.blocks[(setBits*cache.blocksPerSet)+ i].validBit == 0
+            && emptySpot == 0) {
+            emptySpot = 1;
+        }
     }
+
     //four if statements
     
     //hit
-    if (hit) {
+    if (hit == 1) {
+        //update lru
+        hitSpotLRU = cache.blocks[hitSpot].lruLabel;
+        cache.blocks[hitSpot].lruLabel = 0;
+        for (i = 0; i < cache.blocksPerSet; i++) {
+            if ((setBits*cache.blocksPerSet + i) != hitSpot &&
+                cache.blocks[(setBits*cache.blocksPerSet)+i].validBit == 1 &&
+                cache.blocks[(setBits*cache.blocksPerSet)+i].lruLabel < hitSpotLRU) {
+                
+                cache.blocks[(setBits*cache.blocksPerSet)+i].lruLabel++;
+                
+            }
+        }
+        
+        
+        if (instruction == 'l') {
+            return cache.blocks[hitSpot].data[blockOffset];
+        } else {
+            //assign data to address
+            cache.blocks[hitSpot].data[blockOffset] = data;
+            //change dirty bit
+            cache.blocks[hitSpot].isDirty = true;
+            return 0;
+        }
         
     }
+    
+    
+    
     //miss. empty cache block available
-    else if (emptySpot) {
+    if (emptySpot > 0) {
+        
+        
+        
+        
+        
+        
+        
+        
+        
         
     }
     //miss. full but no dirty block (evict case)
+    
+        //evict block with lru = blocksPerSet - 1
 
     //miss. full with  dirty block (evict case)
     
@@ -411,6 +481,26 @@ int lwSw(int addr, int data, char instruction) {
 }
 
 
+/*
+ So if you have two blocks and two sets, you have a total of four blocks within your cache. You know that indexes 0 and 1 within the block array will be for set 0 and indexes 2 and 3 in the block array will be for set 1. There are two blocks in each set, and if you're trying to access the first block within that set, you know that first block starts at index 2, and technically you have all the information to get to the start of the block. So to access the first block, it would look something like cacheStruct.blocks[2] (I'll leave it up to you to figure out how to get that 2). The reason I say this is because set 1 itself starts at index 2 and that's not what you have in your example (where you write "cacheStruct.blocks[1].data") so I wanted to make sure to clear that up.
+  
+
+ Note: the data array is for how many words a block can hold. So if your block can hold 4 words, to access the third word in the block would look something like: cacheStruct.blocks[2].data[2]. Accessing a particular block using cacheStruct.blocks[set_index] grants you access to everything in the block; using cacheStruct.blocks[set_index].data[block_offset] gets you one specific word from the block.
+ */
+
+
+//make sure i is accessing only the blocks within the same set
+/*for (i = cache.blockSize * cache.blocksPerSet * setBits;
+     i < cache.blockSize * cache.blocksPerSet * (setBits+1);
+     i += cache.blockSize) {
+    
+    if (cache.blocks[i].tag == tagBits) {
+        hit = true;
+        for (j = i; j < cache.blockSize; j++) {
+            if (cache.blocks[j].data == blockOffset)
+        }
+    }
+}*/
 
 
 /*
