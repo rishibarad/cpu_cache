@@ -36,7 +36,7 @@ typedef struct blockStruct
   int set;
   int tag;
     //new code
-    int validBit;
+    bool validBit;
 } blockStruct;
 
 typedef struct cacheStruct
@@ -50,6 +50,7 @@ typedef struct cacheStruct
 
 /* Global Cache variable */
 cacheStruct cache;
+stateType state;
 
 /*void printState(stateType *);*/
 int convertNum(int);
@@ -62,7 +63,7 @@ main(int argc, char *argv[])
 {
     //Starter declarations
     char line[MAXLINELENGTH];
-    stateType state;
+    //stateType state;
     FILE *filePtr;
     
     
@@ -389,9 +390,11 @@ int lwSw(int addr, int data, char instruction) {
     int hit = 0;
     int hitSpot = 0;
     int emptySpot = 0;
+    int evictSpot = -1;
     int hitSpotLRU;
-    //adding data to cache:
-    //  cache.blocks[set].data[BO] = data;
+    int finalVal = 0;
+
+    int buildAddr;
     
     //get blockOffset
     blockOffset = all_1 << blockOffsetSize;
@@ -412,14 +415,14 @@ int lwSw(int addr, int data, char instruction) {
     for (i = 0; i < cache.blocksPerSet; i++) {
         //if tag and set index match
         if (cache.blocks[(setBits*cache.blocksPerSet)+ i].tag == tagBits &&
-            cache.blocks[(setBits*cache.blocksPerSet)+ i].validBit == 1) {
+            cache.blocks[(setBits*cache.blocksPerSet)+ i].validBit) {
             hit = 1;
-            hitSpot = setBits+cache.blocksPerSet + i;
+            hitSpot = setBits*cache.blocksPerSet + i;
         }
         //unused tag
-        if (cache.blocks[(setBits*cache.blocksPerSet)+ i].validBit == 0
+        if (cache.blocks[(setBits*cache.blocksPerSet)+ i].validBit == false
             && emptySpot == 0) {
-            emptySpot = 1;
+            emptySpot = setBits*cache.blocksPerSet +i;
         }
     }
 
@@ -432,51 +435,147 @@ int lwSw(int addr, int data, char instruction) {
         cache.blocks[hitSpot].lruLabel = 0;
         for (i = 0; i < cache.blocksPerSet; i++) {
             if ((setBits*cache.blocksPerSet + i) != hitSpot &&
-                cache.blocks[(setBits*cache.blocksPerSet)+i].validBit == 1 &&
+                cache.blocks[(setBits*cache.blocksPerSet)+i].validBit &&
                 cache.blocks[(setBits*cache.blocksPerSet)+i].lruLabel < hitSpotLRU) {
-                
+                //increment lru that are less than the lru of the block just hit
                 cache.blocks[(setBits*cache.blocksPerSet)+i].lruLabel++;
                 
             }
         }
-        
-        
-        if (instruction == 'l') {
-            return cache.blocks[hitSpot].data[blockOffset];
-        } else {
+        finalVal = cache.blocks[hitSpot].data[blockOffset];
+        if (instruction == 's') {
             //assign data to address
             cache.blocks[hitSpot].data[blockOffset] = data;
             //change dirty bit
             cache.blocks[hitSpot].isDirty = true;
-            return 0;
         }
-        
+        return finalVal;
     }
-    
-    
     
     //miss. empty cache block available
     if (emptySpot > 0) {
         
-        
-        
-        
-        
-        
-        
-        
-        
-        
+        //update memory first
+        finalVal = state.mem[addr];
+        if (instruction == 's') {
+            state.mem[addr] = data;
+        }
+        //then use existing values to replace block
+        cache.blocks[emptySpot].isDirty = false;
+        cache.blocks[emptySpot].lruLabel = 0;
+        cache.blocks[emptySpot].set = setBits;
+        cache.blocks[emptySpot].tag = tagBits;
+        cache.blocks[emptySpot].validBit = true;
+        //will need to bring blockSize number of data values from memory
+        addr -= blockOffset;
+        for (i = 0; i < cache.blockSize; i++) {
+            cache.blocks[emptySpot].data[i] = state.mem[addr + i];
+        }
+        //updateLRU
+        for (i = 0; i < cache.blocksPerSet; i++) {
+            if ((setBits*cache.blocksPerSet + i) != emptySpot &&
+                cache.blocks[(setBits*cache.blocksPerSet)+i].validBit) {
+                //increment lru
+                cache.blocks[(setBits*cache.blocksPerSet)+i].lruLabel++;
+            }
+        }
+            
+        return finalVal;
     }
-    //miss. full but no dirty block (evict case)
     
-        //evict block with lru = blocksPerSet - 1
+    
+    //Must be full at this point. check if evict block is dirty or clean
+        
+    for (i = 0; i < cache.blocksPerSet; i++) {
+        if (cache.blocks[(setBits*cache.blocksPerSet)+i].validBit &&
+            cache.blocks[(setBits*cache.blocksPerSet)+i].lruLabel == cache.blocksPerSet-1) {
+            evictSpot = (setBits*cache.blocksPerSet)+i;
+        }
+    }
 
+    //quick error check
+    if (evictSpot == -1) {
+        exit(1);
+    }
+    
+    
     //miss. full with  dirty block (evict case)
+    if (cache.blocks[evictSpot].isDirty) {
+        //reconstruct address
+        buildAddr = all_1;
+        buildAddr = buildAddr & tagBits;
+        buildAddr = buildAddr << setBitsSize;
+
+        buildAddr = buildAddr | setBits;
+        buildAddr = buildAddr << blockOffsetSize;
+
+        //didnt include block offset. (because id subtract it anyways)
+        //buildAddr = buildAddr | blockOffset;
+        
+        //overwrite mem
+        for (i = 0; i < cache.blockSize; i++) {
+            state.mem[buildAddr+i] = cache.blocks[evictSpot].data[i];
+        }
+        
+        
+        //TODO: MAKE SURE YOU DONT FUCK THIS UP
+        //update memory first
+        finalVal = state.mem[addr];
+        if (instruction == 's') {
+            state.mem[addr] = data;
+        }
+        //then use existing values to replace block
+        cache.blocks[evictSpot].isDirty = false;
+        cache.blocks[evictSpot].lruLabel = 0;
+        cache.blocks[evictSpot].set = setBits;
+        cache.blocks[evictSpot].tag = tagBits;
+        cache.blocks[evictSpot].validBit = true;
+        //will need to bring blockSize number of data values from memory
+        addr -= blockOffset;
+        for (i = 0; i < cache.blockSize; i++) {
+            cache.blocks[evictSpot].data[i] = state.mem[addr + i];
+        }
+        //updateLRU
+        for (i = 0; i < cache.blocksPerSet; i++) {
+            if ((setBits*cache.blocksPerSet + i) != evictSpot &&
+                cache.blocks[(setBits*cache.blocksPerSet)+i].validBit) {
+                //increment lru
+                cache.blocks[(setBits*cache.blocksPerSet)+i].lruLabel++;
+            }
+        }
+            
+        return finalVal;
+    }
     
+    //miss. full but no dirty block (evict case)
+
+    //TODO: MAKE SURE YOU DONT FUCK THIS UP
+    //update memory first
+    finalVal = state.mem[addr];
+    if (instruction == 's') {
+        state.mem[addr] = data;
+    }
+    //then use existing values to replace block
+    cache.blocks[evictSpot].isDirty = false;
+    cache.blocks[evictSpot].lruLabel = 0;
+    cache.blocks[evictSpot].set = setBits;
+    cache.blocks[evictSpot].tag = tagBits;
+    cache.blocks[evictSpot].validBit = true;
+    //will need to bring blockSize number of data values from memory
+    addr -= blockOffset;
+    for (i = 0; i < cache.blockSize; i++) {
+        cache.blocks[evictSpot].data[i] = state.mem[addr + i];
+    }
+    //updateLRU
+    for (i = 0; i < cache.blocksPerSet; i++) {
+        if ((setBits*cache.blocksPerSet + i) != evictSpot &&
+            cache.blocks[(setBits*cache.blocksPerSet)+i].validBit) {
+            //increment lru
+            cache.blocks[(setBits*cache.blocksPerSet)+i].lruLabel++;
+        }
+    }
     
-    
-    return 0;
+    return finalVal;
 
 }
 
