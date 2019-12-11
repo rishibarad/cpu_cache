@@ -82,9 +82,6 @@ main(int argc, char *argv[])
     
     //My declarations (p4)
     int ctr;
-    //int j;
-    
-    
     
     if (argc != 5) {
         printf("error: usage: %s <machine-code file>\n", argv[0]);
@@ -128,7 +125,7 @@ main(int argc, char *argv[])
     ctr = 0;
     for (i = 0; i < cache.numSets * cache.blocksPerSet; i++) {
         cache.blocks[i].set = ctr;
-        if (cache.blocksPerSet % i == 0) {
+        if ((i % cache.blocksPerSet) == 0) {
             ctr++;
         }
     }
@@ -390,7 +387,7 @@ int lwSw(int addr, int data, char instruction) {
     int i = 0;
     int hit = 0;
     int hitSpot = 0;
-    int emptySpot = 0;
+    int emptySpot = -1;
     int evictSpot = -1;
     int hitSpotLRU;
     int finalVal = 0;
@@ -411,6 +408,7 @@ int lwSw(int addr, int data, char instruction) {
     //get tagBits
     tagBits = tempAddr;
 
+    //hit or miss
     for (i = 0; i < cache.blocksPerSet; i++) {
         //if tag and set index match
         if (cache.blocks[(setBits*cache.blocksPerSet)+ i].tag == tagBits &&
@@ -420,14 +418,12 @@ int lwSw(int addr, int data, char instruction) {
         }
         //unused tag
         if (cache.blocks[(setBits*cache.blocksPerSet)+ i].validBit == false
-            && emptySpot == 0) {
+            && emptySpot == -1) {
             emptySpot = setBits*cache.blocksPerSet +i;
         }
     }
 
-
-    
-    //hit
+    //if hit
     if (hit == 1) {
         //update lru
         hitSpotLRU = cache.blocks[hitSpot].lruLabel;
@@ -456,8 +452,8 @@ int lwSw(int addr, int data, char instruction) {
         return finalVal;
     }
     
-    //miss. empty cache block available
-    if (emptySpot > 0) {
+    //if miss with empty cache block available
+    if (emptySpot >= 0) {
         cache.blocks[emptySpot].lruLabel = 0;
         cache.blocks[emptySpot].set = setBits;
         cache.blocks[emptySpot].tag = tagBits;
@@ -504,17 +500,17 @@ int lwSw(int addr, int data, char instruction) {
     if (evictSpot == -1) {
         exit(1);
     }
+    
+    //reconstruct address
+    buildAddr = all_1;
+    buildAddr = buildAddr & cache.blocks[evictSpot].tag;
+    buildAddr = buildAddr << setBitsSize;
 
-    //miss. full with  dirty block (evict case)
+    buildAddr = buildAddr | cache.blocks[evictSpot].set;
+    buildAddr = buildAddr << blockOffsetSize;
+
+    //if miss with  dirty block (evict case)
     if (cache.blocks[evictSpot].isDirty) {
-        //reconstruct address
-        buildAddr = all_1;
-        buildAddr = buildAddr & tagBits;
-        buildAddr = buildAddr << setBitsSize;
-
-        buildAddr = buildAddr | setBits;
-        buildAddr = buildAddr << blockOffsetSize;
-        
         //overwrite mem
         for (i = 0; i < cache.blockSize; i++) {
             state.mem[buildAddr+i] = cache.blocks[evictSpot].data[i];
@@ -556,15 +552,9 @@ int lwSw(int addr, int data, char instruction) {
         return finalVal;
     }
     
-    //miss. full but no dirty block (evict case)
     
-    //reconstruct address
-    buildAddr = all_1;
-    buildAddr = buildAddr & tagBits;
-    buildAddr = buildAddr << setBitsSize;
-
-    buildAddr = buildAddr | setBits;
-    buildAddr = buildAddr << blockOffsetSize;
+    
+    //if miss without dirty block (evict case)
     printAction(buildAddr, cache.blockSize, cacheToNowhere);
 
     
@@ -599,8 +589,5 @@ int lwSw(int addr, int data, char instruction) {
         cache.blocks[evictSpot].data[blockOffset] = data;
         cache.blocks[evictSpot].isDirty = true;
     }
-    
-    
     return finalVal;
-
 }
