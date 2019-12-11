@@ -168,7 +168,8 @@ main(int argc, char *argv[])
     while (state.pc < state.numMemory) {
         numExecutions++;
         //printState(&state);
-        memBitties = state.mem[state.pc];
+        //memBitties = state.mem[state.pc];
+        memBitties = lwSw(state.pc, 0, 'l');
         opcode = memBitties >> 22;
         
         regA = memBitties >> 19;
@@ -380,13 +381,13 @@ the tag bits are remaining 01
 int lwSw(int addr, int data, char instruction) {
     int all_1 = 0xFFFFFFFF;
     int tempAddr = addr;
+    int buildAddr;
     int blockOffsetSize = log2(cache.blockSize);
     int blockOffset;
     int setBitsSize = log2(cache.numSets);
     int setBits;
     int tagBits;
     int i = 0;
-    //int j = 0;
     int hit = 0;
     int hitSpot = 0;
     int emptySpot = 0;
@@ -394,7 +395,6 @@ int lwSw(int addr, int data, char instruction) {
     int hitSpotLRU;
     int finalVal = 0;
 
-    int buildAddr;
     
     //get blockOffset
     blockOffset = all_1 << blockOffsetSize;
@@ -410,7 +410,6 @@ int lwSw(int addr, int data, char instruction) {
     tempAddr = tempAddr >> setBitsSize;
     //get tagBits
     tagBits = tempAddr;
- 
 
     for (i = 0; i < cache.blocksPerSet; i++) {
         //if tag and set index match
@@ -426,7 +425,7 @@ int lwSw(int addr, int data, char instruction) {
         }
     }
 
-    //four if statements
+
     
     //hit
     if (hit == 1) {
@@ -443,29 +442,27 @@ int lwSw(int addr, int data, char instruction) {
             }
         }
         finalVal = cache.blocks[hitSpot].data[blockOffset];
-        if (instruction == 's') {
+
+        if (instruction == 'l') {
+            printAction(addr, 1, cacheToProcessor);
+        } else if (instruction == 's') {
             //assign data to address
             cache.blocks[hitSpot].data[blockOffset] = data;
             //change dirty bit
             cache.blocks[hitSpot].isDirty = true;
+            
+            printAction(addr, 1, processorToCache);
         }
         return finalVal;
     }
     
     //miss. empty cache block available
     if (emptySpot > 0) {
-        
-        //update memory first
-        finalVal = state.mem[addr];
-        if (instruction == 's') {
-            state.mem[addr] = data;
-        }
-        //then use existing values to replace block
-        cache.blocks[emptySpot].isDirty = false;
         cache.blocks[emptySpot].lruLabel = 0;
         cache.blocks[emptySpot].set = setBits;
         cache.blocks[emptySpot].tag = tagBits;
         cache.blocks[emptySpot].validBit = true;
+        cache.blocks[emptySpot].isDirty = false;
         //will need to bring blockSize number of data values from memory
         addr -= blockOffset;
         for (i = 0; i < cache.blockSize; i++) {
@@ -479,26 +476,35 @@ int lwSw(int addr, int data, char instruction) {
                 cache.blocks[(setBits*cache.blocksPerSet)+i].lruLabel++;
             }
         }
-            
+        //print memory to cache
+        printAction(addr, cache.blockSize, memoryToCache);
+        
+        addr += blockOffset;
+        if (instruction == 'l') {
+            finalVal = cache.blocks[emptySpot].data[blockOffset];
+            //print cache to processor
+            printAction(addr, 1, cacheToProcessor);
+        } else if (instruction == 's') {
+            cache.blocks[emptySpot].data[blockOffset] = data;
+            cache.blocks[emptySpot].isDirty = true;
+        }
+
         return finalVal;
     }
     
-    
-    //Must be full at this point. check if evict block is dirty or clean
-        
+    //Must be full at this point.
+    //find evict block
     for (i = 0; i < cache.blocksPerSet; i++) {
         if (cache.blocks[(setBits*cache.blocksPerSet)+i].validBit &&
             cache.blocks[(setBits*cache.blocksPerSet)+i].lruLabel == cache.blocksPerSet-1) {
             evictSpot = (setBits*cache.blocksPerSet)+i;
         }
     }
-
     //quick error check
     if (evictSpot == -1) {
         exit(1);
     }
-    
-    
+
     //miss. full with  dirty block (evict case)
     if (cache.blocks[evictSpot].isDirty) {
         //reconstruct address
@@ -508,24 +514,14 @@ int lwSw(int addr, int data, char instruction) {
 
         buildAddr = buildAddr | setBits;
         buildAddr = buildAddr << blockOffsetSize;
-
-        //didnt include block offset. (because id subtract it anyways)
-        //buildAddr = buildAddr | blockOffset;
         
         //overwrite mem
         for (i = 0; i < cache.blockSize; i++) {
             state.mem[buildAddr+i] = cache.blocks[evictSpot].data[i];
         }
-        
-        
-        //TODO: MAKE SURE YOU DONT FUCK THIS UP
-        //update memory first
-        finalVal = state.mem[addr];
-        if (instruction == 's') {
-            state.mem[addr] = data;
-        }
-        //then use existing values to replace block
-        cache.blocks[evictSpot].isDirty = false;
+        //print cache to memory
+        printAction(buildAddr, cache.blockSize, cacheToMemory);
+        //overwrite block
         cache.blocks[evictSpot].lruLabel = 0;
         cache.blocks[evictSpot].set = setBits;
         cache.blocks[evictSpot].tag = tagBits;
@@ -543,19 +539,36 @@ int lwSw(int addr, int data, char instruction) {
                 cache.blocks[(setBits*cache.blocksPerSet)+i].lruLabel++;
             }
         }
-            
+        
+        //print memory to cache
+        printAction(addr, cache.blockSize, memoryToCache);
+        
+        addr += blockOffset;
+        if (instruction == 'l') {
+            finalVal = cache.blocks[evictSpot].data[blockOffset];
+            //print cache to processor
+            printAction(addr, 1, cacheToProcessor);
+        } else if (instruction == 's') {
+            cache.blocks[evictSpot].data[blockOffset] = data;
+            cache.blocks[evictSpot].isDirty = true;
+        }
+        
         return finalVal;
     }
     
     //miss. full but no dirty block (evict case)
+    
+    //reconstruct address
+    buildAddr = all_1;
+    buildAddr = buildAddr & tagBits;
+    buildAddr = buildAddr << setBitsSize;
 
-    //TODO: MAKE SURE YOU DONT FUCK THIS UP
-    //update memory first
-    finalVal = state.mem[addr];
-    if (instruction == 's') {
-        state.mem[addr] = data;
-    }
-    //then use existing values to replace block
+    buildAddr = buildAddr | setBits;
+    buildAddr = buildAddr << blockOffsetSize;
+    printAction(buildAddr, cache.blockSize, cacheToNowhere);
+
+    
+    //overwrite block
     cache.blocks[evictSpot].isDirty = false;
     cache.blocks[evictSpot].lruLabel = 0;
     cache.blocks[evictSpot].set = setBits;
@@ -574,114 +587,20 @@ int lwSw(int addr, int data, char instruction) {
             cache.blocks[(setBits*cache.blocksPerSet)+i].lruLabel++;
         }
     }
+    //print memory to cache
+    printAction(addr, cache.blockSize, memoryToCache);
+    
+    addr += blockOffset;
+    if (instruction == 'l') {
+        finalVal = cache.blocks[evictSpot].data[blockOffset];
+        //print cache to processor
+        printAction(addr, 1, cacheToProcessor);
+    } else if (instruction == 's') {
+        cache.blocks[evictSpot].data[blockOffset] = data;
+        cache.blocks[evictSpot].isDirty = true;
+    }
+    
     
     return finalVal;
 
 }
-
-
-/*
- So if you have two blocks and two sets, you have a total of four blocks within your cache. You know that indexes 0 and 1 within the block array will be for set 0 and indexes 2 and 3 in the block array will be for set 1. There are two blocks in each set, and if you're trying to access the first block within that set, you know that first block starts at index 2, and technically you have all the information to get to the start of the block. So to access the first block, it would look something like cacheStruct.blocks[2] (I'll leave it up to you to figure out how to get that 2). The reason I say this is because set 1 itself starts at index 2 and that's not what you have in your example (where you write "cacheStruct.blocks[1].data") so I wanted to make sure to clear that up.
-  
-
- Note: the data array is for how many words a block can hold. So if your block can hold 4 words, to access the third word in the block would look something like: cacheStruct.blocks[2].data[2]. Accessing a particular block using cacheStruct.blocks[set_index] grants you access to everything in the block; using cacheStruct.blocks[set_index].data[block_offset] gets you one specific word from the block.
- */
-
-
-//make sure i is accessing only the blocks within the same set
-/*for (i = cache.blockSize * cache.blocksPerSet * setBits;
-     i < cache.blockSize * cache.blocksPerSet * (setBits+1);
-     i += cache.blockSize) {
-    
-    if (cache.blocks[i].tag == tagBits) {
-        hit = true;
-        for (j = i; j < cache.blockSize; j++) {
-            if (cache.blocks[j].data == blockOffset)
-        }
-    }
-}*/
-
-
-/*
-After transferring an instruction from cache to the processor, for example transferring instruction 13 from cache to processor, if later on you have an instruction like, lw 0 2 13, would you transfer 13 from the cache to the processor again?
-        -Yes you would need to transfer from the cache to processor again
-*/
-
-/*
- fully associative and direct mapped
- Just to clarify, the only way to have a fully associative cache is when there's only one set right? And for direct mapped, there can be any number of sets as long as the blocks per set is 1?
-        -Yes. Yes. For direct map, number of set = number of blocks in cache.
- */
-/*
- CacheToProcessor vs ProcessorToCache
- Im a bit confused as to when something is CTP or PTC. My logic is if you are taking something from reg to mem(or cache) it would be a PTC and the opposite for CTP. This does not line up in the spec example as it states cacheToProcessor for the sw instruction and processorToCache for the lw instruction. Could someone explain when something would be PTC vs CTP?
-        - Your understanding is correct. For sw in example, we have "@@@ transferring word [6-6] from the processor to the cache", the data is from processor to cache. To fetch the instruction, we need cache to processor. And for every instruction, we need to fetch it before doing the operation.
- */
-
-/*
- Reject the lru
- If I don't find an empty space in a set, I need to reject the lru block and load data into it.
-
- However, in the Cachestruct, we only have one lru, but what we need to know is the lru in the
-
- corresponding set where the data should belong.
-
- I am wondering how to fix it?
-        -You don't need to use lru in the cacheStruct. Basically, you can loop through certain blocks and find max lru label in these blocks each time. It works for fully associative, direct mapped, and n-way associative cache.
- */
-/*
- Size of accessible memory
- I’m confused on how the size of the memory we will access data from lines up with the specified number of sets, blocks per set, and words per block. If we were to have say, 1 word per block, 1 block per set, and 1 set, would this mean that there is only 1 location in memory we can actually read from and pull into the cache?
-        -The only thing that changes the size of the data we bring in from memory is block size. If the block size is 2 words, we are moving groups of 2 words in and out of the cache to/from memory.
-
-        -1 word per block, 1 block per set, and 1 set all all things that describe our cache, not our memory. You can still think of memory like one long array as you have in the past projects.
-
-        -This setup means there only one block in the cache at the time, this block can be a chunk of memory from 0,6500 (or whatever that max number is)
- */
-/*
- In the SPEC of project 4, we have an example at the end.
-
- I wonder whether 6, 23, and 30 are empty memory and are all set to be 0?
-
- Also, in the first line, we transferring word [0-3] from mem to cache. Is it due to we are trying to read the first instruction?
-        -Yes, they are pointing to the empty part of the memory. For your second question, yes.
-
-        Also, yes, you should have enough knowledge to start. You are absolutely correct that you and everyone should start early for every class.
-
- 
- Question about Project Spec
- In the project spec example, the first line says
-
- @@@ transferring word [0-3] from the memory to the cache
-
-  
-
- Are we supposed to transfer all the instructions from memory to the cache right at the beginning? Or were we just trying to read instruction 0 and we just happened to transfer all the other instructions as well since the block size is 4?
-        -We're just trying to read instr 0, and we transfer the 0-3, so if we were trying to read instr 5, we would read 4-7!
-
- */
-/*
- number of sets
- Is it true that there must be at least 2 sets in the cache?
-        -No (how many sets are in a fully associative cache?)
-            Just one and one is considered pow(2,0), so there must be at least 1 set in the cache right? In this way, the set index is 0?
-                    -Exactly!
- */
-/*
- Project 4 cache writeback
- In project 4, do we need to write all cache blocks with dirty bit into memory after the program halts?
-        -Nope! You can leave your cache dirty.
- */
-/*
- LRU in project 4
- Im a little confused as to how to go about implementing the LRU in the project.
-
- I understand that we have an int LRU in each block that would technically hold the address (within the set) of the least recently used block, actually keeping track of it is confusing me.
-
- My initial thought process would be to have a stack-like structure to hold the information as we add/evict blocks, but there isnt really a stack in c is there?
-
- Any tips on how to go about implementing this?
- 
-        -At any given time, each of the n blocks in a set should be ranked from 0 (most recently used) to n-1 (least recently used). It is up to you to figure out how to keep those rankings updated properly
- */
-
