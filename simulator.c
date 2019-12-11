@@ -335,7 +335,7 @@ void printAction(int address, int size, enum actionType type)
  */
 
 //only for debugging purposes
-void printCache()
+/*void printCache()
 {
   printf("\n@@@\ncache:\n");
 
@@ -352,27 +352,8 @@ void printCache()
 
   printf("end cache\n");
 }
-
-
-/*
-About set bit
-
-e.g. if blockSizeInWords=4 numberOfSets=8 blocksPerSet=16
-
-then if we store mem address= 55 data into the cache,
-
-55=0110111
-
-size of block offset: log2(4)=2
-
-size of set bits:log2(8)=3
-
-so the block offset is the last 2 bits: 11
-
-the set bits are next 3 bits:101
-
-the tag bits are remaining 01
 */
+
 // Properly simulates the cache for a load from
 // memory address "addr". Returns the loaded value for loads. Return value meaningless for stores
 int lwSw(int addr, int data, char instruction) {
