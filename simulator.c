@@ -483,6 +483,8 @@ int lwSw(int addr, int data, char instruction) {
         } else if (instruction == 's') {
             cache.blocks[emptySpot].data[blockOffset] = data;
             cache.blocks[emptySpot].isDirty = true;
+            //print processor to cache
+            printAction(addr, 1, processorToCache);
         }
 
         return finalVal;
@@ -522,6 +524,7 @@ int lwSw(int addr, int data, char instruction) {
         cache.blocks[evictSpot].set = setBits;
         cache.blocks[evictSpot].tag = tagBits;
         cache.blocks[evictSpot].validBit = true;
+        cache.blocks[evictSpot].isDirty = false;
         //will need to bring blockSize number of data values from memory
         addr -= blockOffset;
         for (i = 0; i < cache.blockSize; i++) {
@@ -547,6 +550,8 @@ int lwSw(int addr, int data, char instruction) {
         } else if (instruction == 's') {
             cache.blocks[evictSpot].data[blockOffset] = data;
             cache.blocks[evictSpot].isDirty = true;
+            //print processor to cache
+            printAction(addr, 1, processorToCache);
         }
         
         return finalVal;
@@ -588,6 +593,8 @@ int lwSw(int addr, int data, char instruction) {
     } else if (instruction == 's') {
         cache.blocks[evictSpot].data[blockOffset] = data;
         cache.blocks[evictSpot].isDirty = true;
+        //print processor to cache
+        printAction(addr, 1, processorToCache);
     }
     return finalVal;
 }
